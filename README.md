@@ -1,7 +1,7 @@
+<div style="text-align:center">
+  
 # Space Engineers Scripts
-> Please note, that all following scripts were created by me and are distributed 'as is' without any warranties.
-
----
+Please note, that all following scripts were created by me and are distributed 'as is' without any warranties.
 
 Script | Release platform
 ----------|----------
@@ -11,3 +11,5 @@ Script | Release platform
 
 ## Links
 [Space Engineers](http://www.spaceengineersgame.com/)
+
+</div>
