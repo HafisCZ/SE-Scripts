@@ -10,32 +10,41 @@ public readonly string TEXT_PANEL_ID = "#H_STATUS";
 /*
  * Variables
 */
-IMyTextPanel outputPanel = null;
+private List<IMyTextPanel> panels = new List<IMyTextPanel>();
 
-List<IMyTerminalBlock> cargo = new List<IMyTerminalBlock>();
-List<IMyGasTank> tanks = new List<IMyGasTank>();
-List<IMyTerminalBlock> generators = new List<IMyTerminalBlock>();
+private List<IMyGasTank> tanks = new List<IMyGasTank>();
 
-int consumptionMaxRate = 0;
-int conversionRate = 0;
-int storedAmount = 0;
-int consumptionRate = 0;
-int potentialAmount = 0;
+private List<IMyTerminalBlock> generators = new List<IMyTerminalBlock>();
+
+private List<IMyInventory> generatorsInventories = new List<IMyInventory>();
+private List<IMyInventory> cargoInventories = new List<IMyInventory>();
+
+private int consumptionMaxRate = 0;
+private int conversionRate = 0;
+private int storedAmount = 0;
+private int consumptionRate = 0;
+private int potentialAmount = 0;
 
 // Large = 0, Small = 1
-int gridSize = 0;
+private int gridSize = 0;
 
 /*
  * Constructor
 */
-public Program() 
+public Program()
 {
-    // Output panel
-    outputPanel = GridTerminalSystem.GetBlockWithName(TEXT_PANEL_ID) as IMyTextPanel;
-
     // Size of grid
-    gridSize = (int) outputPanel.CubeGrid.GridSizeEnum;
+    List<IMyProgrammableBlock> programmableBlocks = new List<IMyProgrammableBlock>();
+    GridTerminalSystem.GetBlocksOfType<IMyProgrammableBlock>(programmableBlocks);
+
+    gridSize = (int)programmableBlocks[0].CubeGrid.GridSizeEnum;
+
     Echo("Grid Size: " + (gridSize == 1 ? "Small" : "Large"));
+
+    // Output panels
+    List<IMyTerminalBlock> foundBlocks = new List<IMyTerminalBlock>();
+    GridTerminalSystem.SearchBlocksOfName(TEXT_PANEL_ID, foundBlocks);
+    panels = FilterBlockType<IMyTextPanel, IMyTerminalBlock>(foundBlocks);
 
     // Maximum consumption rate
     List<IMyThrust> thrusters = new List<IMyThrust>();
@@ -50,11 +59,16 @@ public Program()
     }
 
     // Cargo
+    List<IMyTerminalBlock> cargo = new List<IMyTerminalBlock>();
     GridTerminalSystem.GetBlocksOfType<IMyCargoContainer>(cargo);
+
+    cargoInventories = GetInventories(cargo);
 
     // Gas generators
     GridTerminalSystem.GetBlocksOfType<IMyGasGenerator>(generators);
     conversionRate = ICE_TO_H2_CONV_SPEED[gridSize] * generators.Count;
+
+    generatorsInventories = GetInventories(generators);
 
     // Hydrogen tanks
     GridTerminalSystem.GetBlocksOfType<IMyGasTank>(tanks);
@@ -79,50 +93,86 @@ public void Main(string argument)
     consumptionRate = storedAmount - lastStoredAmount;
 
     // Potential amount
-    potentialAmount = ICE_TO_H2_CONV_RATIO[gridSize] * (CountMaterialInContainer(cargo, "Ice") + CountMaterialInContainer(generators, "Ice"));
+    potentialAmount = ICE_TO_H2_CONV_RATIO[gridSize] * (GetItemCount(cargoInventories, "Ice") + GetItemCount(generatorsInventories, "Ice"));
 
     // Display data on panel
-    string outputString = "";
-    outputString += "H2 status: " + storedAmount + " + \t" + potentialAmount + "\n"
-        + "Change /T: " + consumptionRate + " \t(" + consumptionMaxRate + ") Hps\n";
+    StringBuilder outputString = new StringBuilder();
+    outputString.Append("H2 status: " + storedAmount + " + \t" + potentialAmount + "\n"
+        + "Change /T: " + consumptionRate + " \t(" + consumptionMaxRate + ") Hps\n");
 
     int minimumBurnTime = (storedAmount + potentialAmount) / -consumptionMaxRate;
 
     if (consumptionRate < 0)
     {
         int potentialBurntime = (storedAmount + potentialAmount) / -consumptionRate;
-        outputString += "Burn time: " + potentialBurntime + " \t(" + minimumBurnTime + ")s\n";
+        outputString.Append("Burn time: " + potentialBurntime + " \t(" + minimumBurnTime + ")s\n");
 
         if (consumptionRate < -conversionRate && generators.Count > 0)
         {
-            outputString += "Not enough hydrogen generation.\nEngines may fail after ~" + (-storedAmount / consumptionRate) + " seconds!";
+            outputString.Append("Not enough hydrogen generation.\nEngines may fail after ~" + (-storedAmount / consumptionRate) + " seconds!");
         }
     } else
     {
-        outputString += "Burn time: ~ \t(" + minimumBurnTime + ")s\n";
+        outputString.Append("Burn time: ~ \t(" + minimumBurnTime + ")s\n");
     }
 
-    outputPanel.WritePublicText(outputString);
+    for (int i = 0; i < panels.Count; i++)
+    {
+        panels[i].WritePublicText(outputString);
+    }
 }
 
 /*
- * Count selected material in supplied terminal blocks
+ * Returns count of items specified by word filter
 */
-public int CountMaterialInContainer(List<IMyTerminalBlock> blocks, string filter)
+public int GetItemCount(List<IMyInventory> inventories, string filter)
 {
     int count = 0;
-    for (int i = 0; i < blocks.Count; i++)
+    for (int i = 0; i < inventories.Count; i++)
     {
-        IMyEntity containerOwner = blocks[i] as IMyEntity;
-        List<IMyInventoryItem> containerContent = containerOwner.GetInventory(0).GetItems();
-        for (int j = 0; j < containerContent.Count; j++)
+        List<IMyInventoryItem> inventoryItems = inventories[i].GetItems();
+        for (int j = 0; j < inventoryItems.Count; j++)
         {
-            if (containerContent[j].Content.SubtypeName.Equals(filter))
+            if (inventoryItems[j].Content.SubtypeName.Equals(filter))
             {
-                count += containerContent[j].Amount.ToIntSafe();
+                count += inventoryItems[j].Amount.ToIntSafe();
             }
         }
     }
 
     return count;
+}
+
+/*
+ * Returns all inventories of supplied IMyTerminalBlocks, trashes invalid or missing inventories
+*/
+public List<IMyInventory> GetInventories(List<IMyTerminalBlock> blocks)
+{
+    List<IMyInventory> inventories = new List<IMyInventory>();
+    for (int i = 0; i < blocks.Count; i++)
+    {
+        for (int j = 0; j < blocks[i].InventoryCount; j++)
+        {
+            inventories.Add(blocks[i].GetInventory(j));
+        }
+    }
+
+    return inventories;
+}
+
+/*
+ * Returns blocks only of supplied type
+*/
+public List<T> FilterBlockType<T, U>(IList<U> blocks) where T : U where U : IMyCubeBlock
+{
+    List<T> filteredBlocks = new List<T>();
+    for (int i = 0; i < blocks.Count; i++)
+    {
+        if (blocks[i] is T)
+        {
+            filteredBlocks.Add((T) blocks[i]);
+        }
+    }
+
+    return filteredBlocks;
 }
