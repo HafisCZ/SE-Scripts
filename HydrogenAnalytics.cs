@@ -258,21 +258,23 @@ public void ShowInfoOnPanels()
             } 
         }
 
-        content.Append("\nRates [Hps]\n\n");
-        if (analyst.ProcessRate != 0)
+        if (analyst.ProcessRate != 0 || analyst.ThrusterMaxDraw != 0)
         {
-            content.AppendFormat("Max gain: {0,-5}\n", (int)analyst.ProcessRate);
+            content.Append("\nRates [Hps]\n\n");
+            if (analyst.ProcessRate != 0)
+            {
+                content.AppendFormat("Max gain: {0,-5}\n", (int)analyst.ProcessRate);
+            }
+
+            if (analyst.ThrusterMaxDraw != 0)
+            {
+                content.AppendFormat("Max draw: {0,-5}\n", (int)analyst.ThrusterMaxDraw);
+            }
         }
 
         if (analyst.ThrusterMaxDraw != 0)
         {
-            content.AppendFormat("Max draw: {0,-5}\n", (int)analyst.ThrusterMaxDraw);
-        }
-
-        content.Append("\nThrust lengths [s]\n\n      Source   Time [s]\n");
-
-        if (analyst.ThrusterMaxDraw != 0)
-        {
+            content.Append("\nThrust lengths [s]\n\n      Source   Time [s]\n");
             if (analyst.StorageSize != 0)
             {
                 content.AppendFormat("Min   Tanks    {0,-5}\n", (int)(analyst.StorageInternal / analyst.ThrusterMaxDraw));
@@ -304,13 +306,27 @@ public void ShowInfoOnPanels()
     {
         StringBuilder content = new StringBuilder();
 
-        content.AppendFormat("Dir %    Hps    Maximum\n\n");
-        for (int i = 5; i >= 0; i--)
+        if (analyst.ThrusterMaxDraw != 0)
         {
-            content.AppendFormat("{0}   {1,-5}{2,-5}   {3,-5}\n", DIRS[5 - i], (int)(100 * analyst.ThrusterVectorDraw[i] / analyst.ThrusterVectorMaxDraw[i]), (int)analyst.ThrusterVectorDraw[i], (int)analyst.ThrusterVectorMaxDraw[i]);
-        }
+            content.AppendFormat("Dir %    Hps    Maximum\n\n");
+            for (int i = 5; i >= 0; i--)
+            {
+                if (analyst.ThrusterVectorMaxDraw[i] != 0)
+                {
+                    content.AppendFormat("{0}   {1,-5}{2,-5}   {3,-5}\n", DIRS[5 - i], (int)(100 * analyst.ThrusterVectorDraw[i] / analyst.ThrusterVectorMaxDraw[i]), (int)analyst.ThrusterVectorDraw[i], (int)analyst.ThrusterVectorMaxDraw[i]);
+                }
+                else
+                {
+                    content.AppendFormat("{0}        No data\n", DIRS[5 - i]);
+                }
+            }
 
-        content.AppendFormat("         {0,-5}   {1,-5}\n", (int)analyst.ThrusterDraw, (int)analyst.ThrusterMaxDraw);
+            content.AppendFormat("         {0,-5}   {1,-5}\n", (int)analyst.ThrusterDraw, (int)analyst.ThrusterMaxDraw);
+        }
+        else
+        {
+            content.Append("No hydrogen thrusters detected!\n\nNote that you need to \nhave any type of cockpit on \nthe grid to gain access \nto thruster data!");
+        }   
 
         for (int i = 0; i < panels[1].Count; i++)
         {
