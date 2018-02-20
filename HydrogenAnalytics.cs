@@ -16,6 +16,9 @@ public class HydrogenNet
 
     private static Matrix IDENTITY = new Matrix(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1);
 
+    private static MyDefinitionId hydrogenDefId = MyDefinitionId.Parse("MyObjectBuilder_GasProperties/Hydrogen");
+    private static MyDefinitionId iceDefId = MyDefinitionId.Parse("MyObjectBuilder_Ore/Ice");
+
     private static double ICE_TO_HYDROGEN_RATIO = 10;
     private static double[] ICE_PER_SECOND = { 167, 83 };
     private static double[] H_THRUSTER_DRAW = { 1092, 6426, 109, 514 };
@@ -65,7 +68,7 @@ public class HydrogenNet
         _gasTanks.Clear();
 
         _program.GridTerminalSystem.GetBlocksOfType(_gasGenerators, b => IsValid(b));
-        _program.GridTerminalSystem.GetBlocksOfType(_gasTanks, b => IsValid(b, "Hydrogen"));
+        _program.GridTerminalSystem.GetBlocksOfType(_gasTanks, b => IsValid(b) && HasResource(b, hydrogenDefId));
         _program.GridTerminalSystem.GetBlocksOfType<IMyCargoContainer>(temp, b => IsValid(b));
         GetInventory(_generatorInventories, _gasGenerators);
         GetInventory(_cargoInventories, temp);
@@ -147,7 +150,7 @@ public class HydrogenNet
         GasFillRatio /= _gasTanks.Count;
 
         GasFillRatioDelta = GasFillRatio - GasFillLastRatio;
-        GasToProduce = ICE_TO_HYDROGEN_RATIO * (GetItemCount(_generatorInventories, "Ice") + GetItemCount(_cargoInventories, "Ice"));
+        GasToProduce = ICE_TO_HYDROGEN_RATIO * (GetItemCount(_generatorInventories, iceDefId) + GetItemCount(_cargoInventories, iceDefId));
 
         ThrusterDraw = 0;
         for (int i = 0; i < 6; i++) {
@@ -176,13 +179,13 @@ public class HydrogenNet
         });
     }
 
-    private int GetItemCount(List<IMyInventory> inventories, string filter)
+    private int GetItemCount(List<IMyInventory> inventories, MyDefinitionId filter)
     {
         int count = 0;
 
         inventories.ForEach(inventory => {
             inventory.GetItems().ForEach(item => {
-                if (item.Content.SubtypeName.Equals(filter)) {
+                if (item.GetDefinitionId().Equals(iceDefId)) {
                     count += item.Amount.ToIntSafe();
                 }
             });
@@ -191,8 +194,18 @@ public class HydrogenNet
         return count;
     }
 
+    private static bool HasResource(IMyGasTank block, MyDefinitionId defId)
+    {
+        var sink = block.Components.Get<MyResourceSinkComponent>();
+        if (sink != null) {
+            return sink.AcceptedResources.Any(r => r == defId);
+        } else {
+            return false;
+        }
+    }
+
     private bool IsValid(IMyTerminalBlock b) { return b.IsWorking && b.IsFunctional && !b.CustomName.Contains("#IGNORE") && b.CubeGrid == _program.Me.CubeGrid; }
-    private bool IsValid(IMyTerminalBlock b, string filter) { return IsValid(b) && b.CustomName.Contains(filter); }
+    private bool IsValid(IMyTerminalBlock b, string filter) { return IsValid(b) && b.BlockDefinition.SubtypeName.Contains(filter); }
 
     public bool IsControlled { get { return _controlled; } }
 }
