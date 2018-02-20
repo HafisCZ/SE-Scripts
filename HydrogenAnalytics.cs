@@ -214,20 +214,27 @@ public Program()
     GridTerminalSystem.GetBlocksOfType<IMyTextPanel>(blocks);
 
     blocks.ForEach(b => {
-        if (b.CustomData.Contains("[H_AMOUNT]")) {
+        if (b.CustomData.Contains("[H_ALL]")) {
             panels[0].Add(b);
-        }
-
-        if (b.CustomData.Contains("[H_PRODUCTION]")) {
             panels[1].Add(b);
-        }
-
-        if (b.CustomData.Contains("[H_CONSUMPTION]")) {
             panels[2].Add(b);
-        }
-
-        if (b.CustomData.Contains("[H_THRUSTER]")) {
             panels[3].Add(b);
+        } else {
+            if (b.CustomData.Contains("[H_AMOUNT]")) {
+                panels[0].Add(b);
+            }
+
+            if (b.CustomData.Contains("[H_PRODUCTION]")) {
+                panels[1].Add(b);
+            }
+
+            if (b.CustomData.Contains("[H_CONSUMPTION]")) {
+                panels[2].Add(b);
+            }
+
+            if (b.CustomData.Contains("[H_THRUSTER]")) {
+                panels[3].Add(b);
+            }
         }
     });
 
