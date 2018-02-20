@@ -1,185 +1,179 @@
-#region hydrogen
-
-public static string[] MARKERS = { "#H_STAT", "#H_THRUST" };
-public static string DIR = "FBLRUD";
-
-public List<IMyTextPanel> panel0 = new List<IMyTextPanel>();
-public List<IMyTextPanel> panel1 = new List<IMyTextPanel>();
-
-public class MyHydrogenThruster
+public class HydrogenNet
 {
-    private static string LARGE_VAR_MARK = "LargeHydrogen";
-
-    private IMyThrust block;
-    private int thrustVector;
-    private bool largeVariant;
-
-    public MyHydrogenThruster(IMyThrust block, int thrustVector)
+    private class IMyThrust_Wrapper
     {
-        this.block = block;
-        this.thrustVector = thrustVector;
-        this.largeVariant = block.BlockDefinition.SubtypeName.Contains(LARGE_VAR_MARK);
+        public IMyThrust block;
+        public int vec;
+        public int size;
+
+        public IMyThrust_Wrapper(IMyThrust block, int vec)
+        {
+            this.block = block;
+            this.vec = vec;
+            size = block.BlockDefinition.SubtypeName.Contains("LargeH") ? 1 : 0;
+        }
     }
 
-    public IMyThrust Block { get { return block; } }
-    public int Direction { get { return thrustVector; } }
-    public bool Large { get { return largeVariant; } }
-}
-
-public class Grid
-{
     private static Matrix IDENTITY = new Matrix(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1);
 
-    private List<IMyInventory> invInt = new List<IMyInventory>();
-    private List<IMyInventory> invExt = new List<IMyInventory>();
+    private static double ICE_TO_HYDROGEN_RATIO = 10;
+    private static double[] ICE_PER_SECOND = { 167, 83 };
+    private static double[] H_THRUSTER_DRAW = { 1092, 6426, 109, 514 };
 
-    private List<IMyGasGenerator> gasGen = new List<IMyGasGenerator>();
-    private List<IMyGasTank> gasTank = new List<IMyGasTank>();
+    private List<IMyTerminalBlock> temp = new List<IMyTerminalBlock>();
 
-    private List<MyHydrogenThruster> thrust = new List<MyHydrogenThruster>();
+    private Program _program;
 
-    private bool controlled;
+    public double GasToProduce = 0;
+    public double GasFillRatioDelta = 0;
+    public double GasFillLastRatio = 0;
+    public double GasFillRatio = 0;
+    public double GasProduction = 0;
+    public double GasCapacity = 0;
+    public double ThrusterDraw = 0;
+    public double ThrusterDrawMax = 0;
+    public double[] ThrusterVectorDraw = new double[6];
+    public double[] ThrusterVectorDrawMax = new double[6];
 
-    private static int[] RATIO_ICE_TO_H2 = { 9, 4 };
-    private static int[] SPEED_ICE_TO_H2 = { 501, 166 };
-    private static int[] H_THRUSTER_DRAW = { 1092, 6426, 109, 514 };
+    private List<IMyThrust_Wrapper> _thrusters = new List<IMyThrust_Wrapper>();
+    private List<IMyInventory> _generatorInventories = new List<IMyInventory>();
+    private List<IMyInventory> _cargoInventories = new List<IMyInventory>();
+    private List<IMyGasGenerator> _gasGenerators = new List<IMyGasGenerator>();
+    private List<IMyGasTank> _gasTanks = new List<IMyGasTank>();
 
-    private double storageLast;
+    private int _gridSize;
+    private bool _controlled;
 
-    private double storageVariation;
-    private double storageSize;
-    private double storageFillPercentage;
-    private double processRate;
-    private double storageExternal;
-    private double thrusterDraw;
-    private double thrusterMaxDraw;
-
-    private double[] vectorThrustDraw;
-    private double[] vectorThrustMaxDraw;
-
-    private IMyGridTerminalSystem system;
-    private MyCubeSize size;
-
-    public Grid(IMyGridTerminalSystem system, MyCubeSize size)
+    public HydrogenNet(Program program)
     {
-        this.system = system;
-        this.size = size;
+        _program = program;
+
+        try {
+            _gridSize = (int) program.Me.CubeGrid.GridSizeEnum;
+            ScanGrid();
+        } catch (Exception e) {
+            program.Echo(e.StackTrace);
+        }
     }
 
-    public void Detect()
+    public void ScanGrid()
     {
-        storageVariation = 0;
-        storageSize = 0;
-        storageFillPercentage = 0;
-        processRate = 0;
-        storageExternal = 0;
-        thrusterDraw = 0;
-        thrusterMaxDraw = 0;
+        _thrusters.Clear();
+        _generatorInventories.Clear();
+        _cargoInventories.Clear();
+        _gasGenerators.Clear();
+        _gasTanks.Clear();
 
-        vectorThrustDraw = new double[6] { 0, 0, 0, 0, 0, 0 };
-        vectorThrustMaxDraw = new double[6] { 0, 0, 0, 0, 0, 0 };
-
-        invInt.Clear();
-        invExt.Clear();
-        gasGen.Clear();
-        gasTank.Clear();
-        thrust.Clear();
-
-        system.GetBlocksOfType<IMyGasTank>(gasTank, b => IsValid(b, "Hydro"));
-        system.GetBlocksOfType<IMyGasGenerator>(gasGen, b => IsValid(b));
-
-        List<IMyTerminalBlock> cargo = new List<IMyTerminalBlock>();
-        system.GetBlocksOfType<IMyCargoContainer>(cargo, b => IsValid(b));
-
-        GetInventory(ref invInt, ref gasGen);
-        GetInventory(ref invExt, ref cargo);
+        _program.GridTerminalSystem.GetBlocksOfType(_gasGenerators, b => IsValid(b));
+        _program.GridTerminalSystem.GetBlocksOfType(_gasTanks, b => IsValid(b, "Hydrogen"));
+        _program.GridTerminalSystem.GetBlocksOfType<IMyCargoContainer>(temp, b => IsValid(b));
+        GetInventory(_generatorInventories, _gasGenerators);
+        GetInventory(_cargoInventories, temp);
 
         Matrix matrix = IDENTITY;
-        controlled = false;
+        _controlled = false;
 
-        List<IMyShipController> control = new List<IMyShipController>();
-        system.GetBlocksOfType<IMyShipController>(control, c => IsValid(c));
-
-        if (control.Count > 0) {
-            for (int i = 0; i < control.Count; i++) {
-                if (control[i].IsMainCockpit) {
-                    control[i].Orientation.GetMatrix(out matrix);
-                    controlled = true;
+        _program.GridTerminalSystem.GetBlocksOfType<IMyShipController>(temp, c => IsValid(c));
+        if (temp.Count > 0) {
+            for (int i = 0; i < temp.Count; i++) {
+                if ((temp[i] as IMyShipController).IsMainCockpit) {
+                    temp[i].Orientation.GetMatrix(out matrix);
+                    _controlled = true;
                     break;
                 }
             }
 
-            if (!controlled) {
-                control[0].Orientation.GetMatrix(out matrix);
-                controlled = true;
+            if (!_controlled) {
+                _controlled = true;
+                temp[0].Orientation.GetMatrix(out matrix);
             }
 
             Matrix.Transpose(ref matrix, out matrix);
         }
 
-        List<IMyThrust> blocks = new List<IMyThrust>();
-        system.GetBlocksOfType<IMyThrust>(blocks, b => IsValid(b, "Hydrogen"));
+        ThrusterDrawMax = 0;
+        for (int i = 0; i < 6; i++) {
+            ThrusterVectorDrawMax[i] = 0;
+        }
 
-        for (int i = 0; i < blocks.Count; i++) {
+        _program.GridTerminalSystem.GetBlocksOfType<IMyThrust>(temp, b => IsValid(b, "Hydrogen"));
+        for (int i = 0; i < temp.Count; i++) {
             int direction = -1;
 
-            if (controlled) {
-                Matrix thruster;
-                blocks[i].Orientation.GetMatrix(out thruster);
-                Vector3 vector = Vector3.Transform(thruster.Backward, matrix);
+            if (_controlled) {
+                Matrix thrust;
+                temp[i].Orientation.GetMatrix(out thrust);
+                Vector3 vector = Vector3.Transform(thrust.Backward, matrix);
 
-                if (vector == IDENTITY.Down) {
+                if (vector == IDENTITY.Backward) {
                     direction = 0;
-                } else if (vector == IDENTITY.Up) {
+                } else if (vector == IDENTITY.Forward) {
                     direction = 1;
                 } else if (vector == IDENTITY.Right) {
                     direction = 2;
                 } else if (vector == IDENTITY.Left) {
                     direction = 3;
-                } else if (vector == IDENTITY.Backward) {
+                } else if (vector == IDENTITY.Down) {
                     direction = 4;
-                } else if (vector == IDENTITY.Forward) {
+                } else if (vector == IDENTITY.Up) {
                     direction = 5;
                 }
             }
 
-            MyHydrogenThruster hydroThruster = new MyHydrogenThruster(blocks[i], direction);
-            thrust.Add(hydroThruster);
+            IMyThrust_Wrapper thruster = new IMyThrust_Wrapper(temp[i] as IMyThrust, direction);
+            _thrusters.Add(thruster);
 
-            int draw = H_THRUSTER_DRAW[2 * GridSize + (hydroThruster.Large ? 1 : 0)];
-            if (controlled) {
-                vectorThrustMaxDraw[direction] += draw;
+            double draw = H_THRUSTER_DRAW[2 * _gridSize + thruster.size];
+
+            if (_controlled) {
+                ThrusterVectorDrawMax[direction] += draw;
             }
 
-            thrusterMaxDraw += draw;
+            ThrusterDrawMax += draw;
         }
 
-        gasTank.ForEach(t => storageSize += t.Capacity);
-        processRate = SPEED_ICE_TO_H2[GridSize] * gasGen.Count;
+        GasCapacity = 0;
+        _gasTanks.ForEach(b => GasCapacity += b.Capacity);
+
+        GasProduction = _gasGenerators.Count * ICE_PER_SECOND[_gridSize] * ICE_TO_HYDROGEN_RATIO;
     }
 
     public void Update()
     {
-        storageLast = storageFillPercentage * storageSize;
-        storageFillPercentage = 0;
-        gasTank.ForEach(block => storageFillPercentage += block.FilledRatio);
-        storageFillPercentage /= gasTank.Count;
-        storageVariation = storageFillPercentage * storageSize - storageLast;
-        storageExternal = RATIO_ICE_TO_H2[GridSize] * (GetItemCount(invExt, "Ice") + GetItemCount(invInt, "Ice"));
+        GasFillLastRatio = GasFillRatio;
 
-        vectorThrustDraw = new double[6] { 0, 0, 0, 0, 0, 0 };
+        GasFillRatio = 0;
+        _gasTanks.ForEach(b => GasFillRatio += b.FilledRatio);
+        GasFillRatio /= _gasTanks.Count;
 
-        thrusterDraw = 0;
-        for (int i = 0; i < thrust.Count; i++) {
-            IMyThrust thruster = thrust[i].Block;
-            float thrusterDraw = (thruster.CurrentThrust / thruster.MaxThrust) * H_THRUSTER_DRAW[2 * GridSize + (thrust[i].Large ? 1 : 0)];
+        GasFillRatioDelta = GasFillRatio - GasFillLastRatio;
+        GasToProduce = ICE_TO_HYDROGEN_RATIO * (GetItemCount(_generatorInventories, "Ice") + GetItemCount(_cargoInventories, "Ice"));
 
-            if (controlled) {
-                vectorThrustDraw[thrust[i].Direction] += thrusterDraw;
+        ThrusterDraw = 0;
+        for (int i = 0; i < 6; i++) {
+            ThrusterVectorDraw[i] = 0;
+        }
+
+        foreach (IMyThrust_Wrapper wrapper in _thrusters) {
+            IMyThrust thruster = wrapper.block;
+
+            double draw = thruster.CurrentThrust / thruster.MaxThrust * H_THRUSTER_DRAW[2 * _gridSize + wrapper.size];
+            if (_controlled) {
+                ThrusterVectorDraw[wrapper.vec] += draw;
             }
 
-            this.thrusterDraw += thrusterDraw;
+            ThrusterDraw += draw;
         }
+    }
+
+    private void GetInventory<T>(List<IMyInventory> inventories, List<T> blocks) where T : IMyTerminalBlock
+    {
+        inventories.Clear();
+        blocks.ForEach(b => {
+            for (int i = 0; i < b.InventoryCount; i++) {
+                inventories.Add(b.GetInventory(i));
+            }
+        });
     }
 
     private int GetItemCount(List<IMyInventory> inventories, string filter)
@@ -197,151 +191,214 @@ public class Grid
         return count;
     }
 
-    void GetInventory<T>(ref List<IMyInventory> invs, ref List<T> blocks) where T : IMyTerminalBlock
-    {
-        for (int i = 0; i < blocks.Count; i++) {
-            for (int j = 0; j < blocks[i].InventoryCount; j++) {
-                invs.Add(blocks[i].GetInventory(j));
-            }
-        }
-    }
-
-    private bool IsValid(IMyTerminalBlock b) { return b.IsWorking && b.IsFunctional && !b.CustomName.Contains("#IGNORE"); }
+    private bool IsValid(IMyTerminalBlock b) { return b.IsWorking && b.IsFunctional && !b.CustomName.Contains("#IGNORE") && b.CubeGrid == _program.Me.CubeGrid; }
     private bool IsValid(IMyTerminalBlock b, string filter) { return IsValid(b) && b.CustomName.Contains(filter); }
 
-    public List<IMyInventory> InventoryExt { get { return invExt; } }
-    public List<IMyInventory> InventoryInt { get { return invInt; } }
-    public List<MyHydrogenThruster> Thrusters { get { return thrust; } }
-    public List<IMyGasGenerator> Generators { get { return gasGen; } }
-    public List<IMyGasTank> Tanks { get { return gasTank; } }
-    public int GridSize { get { return (int) size; } }
-    public bool HasController { get { return controlled; } }
-
-    public double StorageVariation { get { return storageVariation; } }
-    public double StorageSize { get { return storageSize; } }
-    public double StorageFillPercentage { get { return storageFillPercentage; } }
-    public double StorageExternal { get { return storageExternal; } }
-    public double StorageInternal { get { return storageFillPercentage * storageSize; } }
-    public double ProcessRate { get { return processRate; } }
-    public double ThrusterMaxDraw { get { return thrusterMaxDraw; } }
-    public double ThrusterDraw { get { return thrusterDraw; } }
-    public double[] ThrusterVectorDraw { get { return vectorThrustDraw; } }
-    public double[] ThrusterVectorMaxDraw { get { return vectorThrustMaxDraw; } }
+    public bool IsControlled { get { return _controlled; } }
 }
 
-public List<T> FilterBlockType<T, U>(IList<U> blocks) where U : IMyCubeBlock where T : U
-{
-    List<T> filteredBlocks = new List<T>();
-    for (int i = 0; i < blocks.Count; i++) {
-        if (blocks[i] is T) {
-            filteredBlocks.Add((T) blocks[i]);
-        }
-    }
+public HydrogenNet net;
 
-    return filteredBlocks;
-}
-
-public void ShowInfoOnPanels()
-{
-    if (panel0.Count > 0) {
-        StringBuilder content = new StringBuilder();
-
-        if (grid.StorageSize != 0) {
-            content.AppendFormat("Hydrogen Status [H]\n\nStored H2: {0,-5} {1,6}%\n", (int) grid.StorageInternal, (int) (grid.StorageFillPercentage * 100));
-            if (grid.ProcessRate != 0) {
-                content.AppendFormat("Extern H2: {0,-5}\n", (int) grid.StorageExternal);
-            }
-        }
-
-        if (grid.ProcessRate != 0 || grid.ThrusterMaxDraw != 0) {
-            content.Append("\nRates [Hps]\n\n");
-            if (grid.ProcessRate != 0) {
-                content.AppendFormat("Max gain: {0,-5}\n", (int) grid.ProcessRate);
-            }
-
-            if (grid.ThrusterMaxDraw != 0) {
-                content.AppendFormat("Max draw: {0,-5}\n", (int) grid.ThrusterMaxDraw);
-            }
-        }
-
-        if (grid.ThrusterMaxDraw != 0) {
-            content.Append("\nThrust lengths [s]\n\n      Source   Time [s]\n");
-            if (grid.StorageSize != 0) {
-                content.AppendFormat("Min   Tanks    {0,-5}\n", (int) (grid.StorageInternal / grid.ThrusterMaxDraw));
-                if (grid.ThrusterDraw != 0) {
-                    content.AppendFormat("Apx   Tanks    {0,-5}\n", (int) (grid.StorageInternal / grid.ThrusterDraw));
-                }
-            }
-
-            if (grid.ProcessRate != 0) {
-                content.AppendFormat("Min   Any      {0,-5}\n", (int) ((grid.StorageInternal + grid.StorageExternal) / grid.ThrusterMaxDraw));
-                if (grid.ThrusterDraw != 0) {
-                    content.AppendFormat("Apx   Any      {0,-5}\n", (int) ((grid.StorageInternal + grid.StorageExternal) / grid.ThrusterDraw));
-                }
-            }
-        }
-        for (int i = 0; i < panel0.Count; i++) {
-            panel0[i].WritePublicText(content);
-        }
-    }
-
-    if (panel1.Count > 0) {
-        StringBuilder content = new StringBuilder();
-
-        if (grid.ThrusterMaxDraw != 0 && grid.HasController) {
-            content.AppendFormat("Dir %    Hps    Maximum\n\n");
-            for (int i = 5; i >= 0; i--) {
-                if (grid.ThrusterVectorMaxDraw[i] != 0) {
-                    content.AppendFormat("{0}   {1,-5}{2,-5}   {3,-5}\n", DIR[5 - i], (int) (100 * grid.ThrusterVectorDraw[i] / grid.ThrusterVectorMaxDraw[i]), (int) grid.ThrusterVectorDraw[i], (int) grid.ThrusterVectorMaxDraw[i]);
-                } else {
-                    content.AppendFormat("{0}        No data\n", DIR[5 - i]);
-                }
-            }
-
-            content.AppendFormat("\n         {0,-5}   {1,-5}\n", (int) grid.ThrusterDraw, (int) grid.ThrusterMaxDraw);
-        } else {
-            content.Append("No hydrogen thrusters detected!\n\nNote that you need to \nhave any type of cockpit on \nthe grid to gain access \nto thruster data!");
-        }
-
-        for (int i = 0; i < panel1.Count; i++) {
-            panel1[i].WritePublicText(content);
-        }
-    }
-}
-
-public Grid grid;
+public List<IMyTextPanel>[] panels = new List<IMyTextPanel>[]{
+    new List<IMyTextPanel>(),
+    new List<IMyTextPanel>(),
+    new List<IMyTextPanel>(),
+    new List<IMyTextPanel>()
+};
 
 public Program()
 {
     Runtime.UpdateFrequency = UpdateFrequency.Update10 | UpdateFrequency.Update100;
 
-    List<IMyTerminalBlock> blocks = new List<IMyTerminalBlock>();
-    GridTerminalSystem.SearchBlocksOfName(MARKERS[0], blocks);
-    panel0 = FilterBlockType<IMyTextPanel, IMyTerminalBlock>(blocks);
-    blocks.Clear();
-    GridTerminalSystem.SearchBlocksOfName(MARKERS[1], blocks);
-    panel1 = FilterBlockType<IMyTextPanel, IMyTerminalBlock>(blocks);
+    List<IMyTextPanel> blocks = new List<IMyTextPanel>();
+    GridTerminalSystem.GetBlocksOfType<IMyTextPanel>(blocks);
 
-    grid = new Grid(GridTerminalSystem, Me.CubeGrid.GridSizeEnum);
-    grid.Detect();
+    blocks.ForEach(b => {
+        if (b.CustomData.Contains("[H_AMOUNT]")) {
+            panels[0].Add(b);
+        }
+
+        if (b.CustomData.Contains("[H_PRODUCTION]")) {
+            panels[1].Add(b);
+        }
+
+        if (b.CustomData.Contains("[H_CONSUMPTION]")) {
+            panels[2].Add(b);
+        }
+
+        if (b.CustomData.Contains("[H_THRUSTER]")) {
+            panels[3].Add(b);
+        }
+    });
+
+    for (int i = 0; i < 4; i++) {
+        panels[i].ForEach(p => p.Font = "Monospace");
+    }
+
+    net = new HydrogenNet(this);
 }
 
 public void Main(string argument, UpdateType updateType)
 {
     if ((updateType & UpdateType.Terminal) != 0) {
-        grid.Detect();
-        grid.Update();
+        net.ScanGrid();
+        net.Update();
         ShowInfoOnPanels();
     }
 
     if ((updateType & UpdateType.Update100) != 0) {
-        grid.Detect();
+        net.ScanGrid();
     }
 
     if ((updateType & UpdateType.Update10) != 0) {
-        grid.Update();
+        net.Update();
         ShowInfoOnPanels();
     }
 }
 
-#endregion
+public void ShowInfoOnPanels()
+{
+    StringBuilder content = new StringBuilder();
+
+    for (int i = 0; i < 4; i++) {
+        if (panels[i].Count > 0) {
+            panels[i].ForEach(p => p.WritePublicText(""));
+        }
+    }
+
+    if (panels[0].Count > 0) {
+        content.Clear();
+
+        if (net.GasCapacity != 0) {
+            content.Append("[        HYDROGEN        ]\n");
+
+            int fill = (int) (26 * net.GasFillRatio);
+            for (int i = 0; i < 26; i++) {
+                content.Append(i < fill ? "█" : "_");
+            }
+
+            int mod = 0;
+            int amm = (int) (net.GasFillRatio * net.GasCapacity);
+            for (int i = 0; i < 4; i++) {
+                if (amm > 10 * Math.Pow(1000, mod + 1)) {
+                    mod++;
+                } else {
+                    break;
+                }
+            }
+
+            int mod2 = 0;
+            int amm2 = (int) net.GasCapacity;
+            for (int i = 0; i < 4; i++) {
+                if (amm2 > 10 * Math.Pow(1000, mod2 + 1)) {
+                    mod2++;
+                } else {
+                    break;
+                }
+            }
+
+            content.AppendFormat("\nSTR: {0,4} {1}L MAX: {2,4} {3}L\n\n", (int) (amm / Math.Pow(1000, mod)), " kMGT"[mod], (int) (amm2 / Math.Pow(1000, mod2)), " kMGT"[mod2]);
+        }
+
+        panels[0].ForEach(p => p.WritePublicText(content, true));
+    }
+
+    if (panels[1].Count > 0) {
+        content.Clear();
+
+        if (net.GasProduction != 0) {
+            content.Append("[       PRODUCTION       ]\n");
+
+            int mod = 0;
+            int amm = (int) net.GasToProduce;
+            for (int i = 0; i < 4; i++) {
+                if (amm > 10 * Math.Pow(1000, mod + 1)) {
+                    mod++;
+                } else {
+                    break;
+                }
+            }
+
+            int mod2 = 0;
+            int amm2 = (int) net.GasProduction;
+            for (int i = 0; i < 4; i++) {
+                if (amm2 > 10 * Math.Pow(1000, mod2 + 1)) {
+                    mod2++;
+                } else {
+                    break;
+                }
+            }
+
+            TimeSpan rem = TimeSpan.FromSeconds(net.GasToProduce / net.GasProduction);
+
+            content.AppendFormat("ICE: {0,4} {1}L      {2,5}\n", (int) (amm / Math.Pow(1000, mod)), " kMGT"[mod], rem.ToString(@"hh\:mm\.ss"));
+            content.AppendFormat("CVR: {0,4} {1}Ls\n\n", (int) (amm2 / Math.Pow(1000, mod2)), " kMGT"[mod2]);
+        }
+
+        panels[1].ForEach(p => p.WritePublicText(content, true));
+    }
+
+    if (panels[2].Count > 0) {
+        content.Clear();
+
+        if (net.ThrusterDrawMax != 0) {
+            content.Append("[   HYDROGEN THRUSTERS   ]\n");
+
+            int mod = 0;
+            int amm = (int) net.ThrusterDraw;
+            for (int i = 0; i < 4; i++) {
+                if (amm > 10 * Math.Pow(1000, mod + 1)) {
+                    mod++;
+                } else {
+                    break;
+                }
+            }
+
+            int mod2 = 0;
+            int amm2 = (int) net.ThrusterDrawMax;
+            for (int i = 0; i < 4; i++) {
+                if (amm2 > 10 * Math.Pow(1000, mod2 + 1)) {
+                    mod2++;
+                } else {
+                    break;
+                }
+            }
+
+            int fill = (int) (26 * (net.ThrusterDraw / net.ThrusterDrawMax));
+            for (int i = 0; i < 26; i++) {
+                content.Append(i < fill ? "█" : "_");
+            }
+
+            TimeSpan curr = TimeSpan.FromSeconds(net.ThrusterDraw > 50 ? (net.GasFillRatio * net.GasCapacity + net.GasToProduce) / net.ThrusterDraw : 0);
+            TimeSpan minm = TimeSpan.FromSeconds((net.GasFillRatio * net.GasCapacity + net.GasToProduce) / net.ThrusterDrawMax);
+
+            content.AppendFormat("\nSTR: {0,4} {1}Ls     {2,5}\n", (int) (amm / Math.Pow(1000, mod)), " kMGT"[mod], curr.ToString(@"hh\:mm\.ss"));
+            content.AppendFormat("MAX: {0,4} {1}Ls     {2,5}\n\n", (int) (amm2 / Math.Pow(1000, mod2)), " kMGT"[mod2], minm.ToString(@"hh\:mm\.ss"));
+        }
+
+        panels[2].ForEach(p => p.WritePublicText(content, true));
+    }
+
+    if (panels[3].Count > 0) {
+        content.Clear();
+
+        if (net.ThrusterDrawMax != 0) {
+            content.Append("[     VECTOR THRUSTS     ]\n\n");
+            if (net.IsControlled) {
+                for (int i = 7; i >= 0; i--) {
+                    for (int j = 0; j < 6; j++) {
+                        content.AppendFormat("  {0}", (i < (int)(8 * net.ThrusterVectorDraw[j] / net.ThrusterVectorDrawMax[j]) ? "██" : "  "));
+                    }
+
+                    content.Append("\n");
+                }
+
+                content.Append("\n  FS  BS  LT  RT  UP  DN\n");
+            } else {
+                content.Append("  NO CONTROLLER LOCATED\n\n");
+            }
+        }
+
+        panels[3].ForEach(p => p.WritePublicText(content, true));
+    }
+}
