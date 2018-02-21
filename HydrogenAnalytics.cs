@@ -407,7 +407,8 @@ public void ShowInfoOnPanels()
             if (net.IsControlled) {
                 for (int i = 7; i >= 0; i--) {
                     for (int j = 0; j < 6; j++) {
-                        content.AppendFormat("  {0}", (i < (int)(8 * net.ThrusterVectorDraw[j] / net.ThrusterVectorDrawMax[j]) ? "██" : "  "));
+                        int value = (int) (16 * net.ThrusterVectorDraw[j] / net.ThrusterVectorDrawMax[j]);
+                        content.AppendFormat("  {0}", (i * 2 < value ? (i * 2 + 1 < value ? "██" : "▄▄") : "  "));
                     }
 
                     content.Append("\n");
