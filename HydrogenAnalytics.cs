@@ -9,7 +9,7 @@ public class HydrogenNet
         {
             Block = block;
             Vec = vec;
-            Size = block.BlockDefinition.SubtypeName.Contains("BlockLargeHydrogenThrust") ? 1 : 0;
+            Size = block.BlockDefinition.SubtypeName.Contains("LargeHydrogen") ? 1 : 0;
         }
     }
 
@@ -122,15 +122,15 @@ public class HydrogenNet
                 }
             }
 
-            IMyThrust_Wrapper thruster = new IMyThrust_Wrapper(temp[i] as IMyThrust, direction);
-            draw = H_THRUSTER_DRAW[2 * _gridSize + thruster.Size];
+            IMyThrust_Wrapper wrapper = new IMyThrust_Wrapper(temp[i] as IMyThrust, direction);
+            draw = H_THRUSTER_DRAW[2 * _gridSize + wrapper.Size];
             ThrusterDrawMax += draw;
 
             if (_controlled) {
                 ThrusterVectorDrawMax[direction] += draw;
             }
 
-            _thrusters.Add(thruster);
+            _thrusters.Add(wrapper);
         }
 
         GasCapacity = 0;
@@ -205,41 +205,37 @@ public FancyLCD lcd1 = new FancyLCD();
 public FancyLCD lcd2 = new FancyLCD();
 public FancyLCD lcd3 = new FancyLCD();
 
+public void AddPanel(IMyTextPanel panel)
+{
+    bool addToAll = panel.CustomData.Contains("[H_ALL]");
+
+    if (addToAll || panel.CustomData.Contains("[H_AMOUNT]")) {
+        panels[0].Add(panel);
+    }
+
+    if (addToAll || panel.CustomData.Contains("[H_PRODUCTION]")) {
+        panels[1].Add(panel);
+    }
+
+    if (addToAll || panel.CustomData.Contains("[H_CONSUMPTION]")) {
+        panels[2].Add(panel);
+    }
+
+    if (addToAll || panel.CustomData.Contains("[H_THRUSTER]")) {
+        panels[3].Add(panel);
+    }
+
+    panel.Font = "Monospace";
+    panel.FontSize = 1.0F;
+}
+
 public Program()
 {
     Runtime.UpdateFrequency = UpdateFrequency.Update10 | UpdateFrequency.Update100;
 
     List<IMyTextPanel> blocks = new List<IMyTextPanel>();
     GridTerminalSystem.GetBlocksOfType<IMyTextPanel>(blocks);
-
-    blocks.ForEach(b => {
-        if (b.CustomData.Contains("[H_ALL]")) {
-            panels[0].Add(b);
-            panels[1].Add(b);
-            panels[2].Add(b);
-            panels[3].Add(b);
-        } else {
-            if (b.CustomData.Contains("[H_AMOUNT]")) {
-                panels[0].Add(b);
-            }
-
-            if (b.CustomData.Contains("[H_PRODUCTION]")) {
-                panels[1].Add(b);
-            }
-
-            if (b.CustomData.Contains("[H_CONSUMPTION]")) {
-                panels[2].Add(b);
-            }
-
-            if (b.CustomData.Contains("[H_THRUSTER]")) {
-                panels[3].Add(b);
-            }
-        }
-    });
-
-    for (int i = 0; i < 4; i++) {
-        panels[i].ForEach(p => p.Font = "Monospace");
-    }
+    blocks.ForEach(b => AddPanel(b));
 
     net = new HydrogenNet(this);
 }
@@ -266,9 +262,8 @@ public class FancyLCD
 {
     private StringBuilder m_content = new StringBuilder();
 
-    public void Clear() { m_content.Clear(); }
-
-    public void AddLine(string text) {
+    public void AddLine(string text)
+    {
         m_content.Append(text);
         m_content.Append('\n');
     }
@@ -296,10 +291,8 @@ public class FancyLCD
         return scale;
     }
 
-    public static double GetScaled1K(int mod, double value)
-    {
-        return value / Math.Pow(1000, mod);
-    }
+    public void Clear() { m_content.Clear(); }
+    public static double GetScaled1K(int mod, double value) { return value / Math.Pow(1000, mod); }
 
     public StringBuilder Content { get { return m_content; } }
 }
@@ -320,7 +313,7 @@ public void ShowInfoOnPanels()
         int mod0 = FancyLCD.GetScale1K(4, net.GasFillRatio * net.GasCapacity);
         int mod1 = FancyLCD.GetScale1K(4, net.GasCapacity);
 
-        lcd0.Content.AppendFormat("STR: {0,4} {1}L MAX: {2,4} {3}L\n\n", (int) FancyLCD.GetScaled1K(mod0, net.GasFillRatio * net.GasCapacity), " kMGT"[mod0],  (int) FancyLCD.GetScaled1K(mod1, net.GasCapacity), " kMGT"[mod1]);
+        lcd0.Content.AppendFormat("STR: {0,4} {1}L MAX: {2,4} {3}L\n\n", (int) FancyLCD.GetScaled1K(mod0, net.GasFillRatio * net.GasCapacity), " kMGT"[mod0], (int) FancyLCD.GetScaled1K(mod1, net.GasCapacity), " kMGT"[mod1]);
 
         panels[0].ForEach(p => p.WritePublicText(lcd0.Content, true));
     }
